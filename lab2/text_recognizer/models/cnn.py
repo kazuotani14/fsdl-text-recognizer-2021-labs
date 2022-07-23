@@ -9,6 +9,7 @@ import torch.nn.functional as F
 CONV_DIM = 64
 FC_DIM = 128
 IMAGE_SIZE = 28
+NUM_CONV_LAYERS = 2
 
 
 class ConvBlock(nn.Module):
@@ -37,6 +38,29 @@ class ConvBlock(nn.Module):
         r = self.relu(c)
         return r
 
+class ResConvBlock(nn.Module):
+    def __init__(self, input_channels: int, output_channels: int) -> None:
+        super().__init__()
+        self.conv = nn.Conv2d(input_channels, output_channels, kernel_size=3, stride=1, padding=1)
+        self.relu = nn.ReLU()
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        """
+        Parameters
+        ----------
+        x
+            of dimensions (B, C, H, W)
+
+        Returns
+        -------
+        torch.Tensor
+            of dimensions (B, C, H, W)
+        """
+        residual = x
+        c = self.conv(x)
+        cr = c + residual # Note: before relu
+        r = self.relu(cr)
+        return r
 
 class CNN(nn.Module):
     """Simple CNN for recognizing characters in a square image."""
@@ -50,9 +74,20 @@ class CNN(nn.Module):
 
         conv_dim = self.args.get("conv_dim", CONV_DIM)
         fc_dim = self.args.get("fc_dim", FC_DIM)
+        num_conv_layers = self.args.get("num_conv_layers", NUM_CONV_LAYERS)
+        assert(num_conv_layers >= 1)
 
-        self.conv1 = ConvBlock(input_dims[0], conv_dim)
-        self.conv2 = ConvBlock(conv_dim, conv_dim)
+        conv_module = ConvBlock # Or ResConvBlock
+
+        self.convs = nn.ModuleList()
+        for i in range(num_conv_layers):
+            if i==0:
+                self.convs.append(conv_module(input_dims[0], conv_dim))
+            else: 
+                self.convs.append(conv_module(conv_dim, conv_dim))
+
+        # self.conv1 = conv_module(input_dims[0], conv_dim)
+        # self.conv2 = conv_module(conv_dim, conv_dim)
         self.dropout = nn.Dropout(0.25)
         self.max_pool = nn.MaxPool2d(2)
 
@@ -76,8 +111,10 @@ class CNN(nn.Module):
         """
         _B, _C, H, W = x.shape
         assert H == W == IMAGE_SIZE
-        x = self.conv1(x)
-        x = self.conv2(x)
+        for conv in self.convs:
+          x = conv(x)
+        # x = self.conv1(x)
+        # x = self.conv2(x)
         x = self.max_pool(x)
         x = self.dropout(x)
         x = torch.flatten(x, 1)
@@ -90,4 +127,5 @@ class CNN(nn.Module):
     def add_to_argparse(parser):
         parser.add_argument("--conv_dim", type=int, default=CONV_DIM)
         parser.add_argument("--fc_dim", type=int, default=FC_DIM)
+        parser.add_argument("--num_conv_layers", type=int, default=NUM_CONV_LAYERS)
         return parser
